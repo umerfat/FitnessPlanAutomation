@@ -1,17 +1,16 @@
 name: Process New Clients
 
 on:
-  # Manual trigger from GitHub UI / mobile app
   workflow_dispatch:
     inputs:
       mode:
-        description: "Processing mode"
+        description: "Processing mode: new = only unprocessed, all = everyone"
         required: true
         default: "new"
         type: choice
         options:
-          - new          # Only unprocessed clients
-          - all          # Reprocess everyone
+          - new
+          - all
       client_name:
         description: "Specific client name (leave empty to process all new)"
         required: false
@@ -21,10 +20,6 @@ on:
         required: false
         default: false
         type: boolean
-
-  # Optional: run on a schedule (e.g., daily at 8am UTC)
-  # schedule:
-  #   - cron: '0 8 * * *'
 
 jobs:
   generate-plans:
