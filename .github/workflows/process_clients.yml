@@ -3,27 +3,24 @@ name: Process New Clients
 on:
   workflow_dispatch:
     inputs:
-      mode:
-        description: "Processing mode: new = only unprocessed, all = everyone"
-        required: true
-        default: "new"
-        type: choice
-        options:
-          - new
-          - all
       client_name:
-        description: "Specific client name (leave empty to process all new)"
-        required: false
+        description: "Client name to process"
+        required: true
         type: string
-      send_to_client:
-        description: "Also send plan directly to client (skip coach review)"
-        required: false
-        default: false
-        type: boolean
+
+# Need write permission to commit plans to repo
+permissions:
+  contents: write
 
 jobs:
-  generate-plans:
+  # ──────────────────────────────────────────────
+  # PHASE 1: Generate plan → commit to repo → email coach
+  # ──────────────────────────────────────────────
+  generate:
     runs-on: ubuntu-latest
+    outputs:
+      plan_path: ${{ steps.commit.outputs.plan_path }}
+      client_email: ${{ steps.process.outputs.client_email }}
 
     steps:
       - name: Checkout code
@@ -47,7 +44,6 @@ jobs:
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           COACH_EMAIL: ${{ secrets.COACH_EMAIL }}
         run: |
-          # Create .env file from secrets
           cat > .env << EOF
           GEMINI_API_KEY=${GEMINI_API_KEY}
           GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
@@ -56,79 +52,136 @@ jobs:
           COACH_EMAIL=${COACH_EMAIL}
           BRAND_NAME=Umer Hurrah
           EOF
-
-          # Write Google credentials files from secrets
           echo "${GOOGLE_CREDENTIALS_JSON}" > credentials.json
           echo "${GOOGLE_TOKEN_JSON}" > token.json
 
-      - name: Create output directory
-        run: mkdir -p output
+      - name: Create directories
+        run: mkdir -p output plans/pending
 
-      - name: Restore processed clients tracking
-        uses: actions/cache@v4
-        with:
-          path: processed_clients.json
-          key: processed-clients-${{ github.run_id }}
-          restore-keys: |
-            processed-clients-
-
-      - name: Process clients
+      - name: Generate plan and email coach
+        id: process
         env:
           CI: "true"
         run: |
-          if [ -n "${{ inputs.client_name }}" ]; then
-            echo "Processing specific client: ${{ inputs.client_name }}"
-            python main.py --name "${{ inputs.client_name }}"
-          elif [ "${{ inputs.mode }}" = "all" ]; then
-            echo "Processing all clients..."
-            python main.py --all
-          else
-            echo "Processing new clients only..."
-            python main.py
-          fi
+          python main.py --name "${{ inputs.client_name }}"
 
-      - name: Send to client (if requested)
-        if: inputs.send_to_client && inputs.client_name != ''
-        env:
-          CI: "true"
-        run: |
-          python -c "
+          # Get client email for phase 2
+          CLIENT_EMAIL=$(python -c "
           from sheets_reader import get_client_by_name
-          from email_sender import send_plan_to_client
-          import glob, os
-          client = get_client_by_name('${{ inputs.client_name }}')
-          if client:
-              name = client['Full Name']
-              email = client['Email']
-              safe = name.replace(' ', '_').replace('/', '_')
-              files = glob.glob(f'output/{safe}_plan.docx')
-              if files:
-                  send_plan_to_client(name, email, files[0])
-                  print(f'Sent to {email}')
-              else:
-                  print('No plan file found')
-          else:
-              print('Client not found')
-          "
+          c = get_client_by_name('${{ inputs.client_name }}')
+          print(c['Email'] if c else '')
+          ")
+          echo "client_email=${CLIENT_EMAIL}" >> $GITHUB_OUTPUT
 
-      - name: Upload generated plans
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fitness-plans-${{ github.run_number }}
-          path: output/*.docx
-          retention-days: 30
+      - name: Commit plan to repo for review
+        id: commit
+        run: |
+          # Copy generated doc to plans/pending/
+          SAFE_NAME=$(echo "${{ inputs.client_name }}" | tr ' /' '_')
+          SRC="output/${SAFE_NAME}_plan.docx"
+          DEST="plans/pending/${SAFE_NAME}_plan.docx"
+
+          if [ -f "$SRC" ]; then
+            cp "$SRC" "$DEST"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$DEST"
+            git commit -m "📋 Plan ready for review: ${{ inputs.client_name }}"
+            git push
+            echo "plan_path=${DEST}" >> $GITHUB_OUTPUT
+            echo "✅ Plan committed to ${DEST}"
+          else
+            echo "❌ No plan file found at ${SRC}"
+            exit 1
+          fi
 
       - name: Summary
-        if: always()
         run: |
-          echo "## Results" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Phase 1: Plan Generated" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if ls output/*.docx 1>/dev/null 2>&1; then
-            echo "### Generated Plans:" >> $GITHUB_STEP_SUMMARY
-            for f in output/*.docx; do
-              echo "- ✅ $(basename $f)" >> $GITHUB_STEP_SUMMARY
-            done
-          else
-            echo "No plans generated." >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "**Client:** ${{ inputs.client_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Email:** ${{ steps.process.outputs.client_email }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Plan:** \`${{ steps.commit.outputs.plan_path }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next steps:" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✉️ Check your email for the plan" >> $GITHUB_STEP_SUMMARY
+          echo "2. 📝 If edits needed: update the file at \`${{ steps.commit.outputs.plan_path }}\` and push" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ Approve the **send-to-client** job below to email the plan to the client" >> $GITHUB_STEP_SUMMARY
+
+  # ──────────────────────────────────────────────
+  # PHASE 2: After approval → send plan to client
+  # ──────────────────────────────────────────────
+  send-to-client:
+    runs-on: ubuntu-latest
+    needs: generate
+    environment: send-to-client
+
+    steps:
+      - name: Checkout latest code (includes any edits you pushed)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write secrets to env
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          GOOGLE_TOKEN_JSON: ${{ secrets.GOOGLE_TOKEN_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
+          COACH_EMAIL: ${{ secrets.COACH_EMAIL }}
+        run: |
+          cat > .env << EOF
+          GEMINI_API_KEY=${GEMINI_API_KEY}
+          GOOGLE_SHEET_ID=${GOOGLE_SHEET_ID}
+          SHEET_NAME=ClientResponses
+          SMTP_EMAIL=${SMTP_EMAIL}
+          COACH_EMAIL=${COACH_EMAIL}
+          BRAND_NAME=Umer Hurrah
+          EOF
+          echo "${GOOGLE_CREDENTIALS_JSON}" > credentials.json
+          echo "${GOOGLE_TOKEN_JSON}" > token.json
+
+      - name: Send plan to client
+        env:
+          CI: "true"
+        run: |
+          PLAN_PATH="${{ needs.generate.outputs.plan_path }}"
+          CLIENT_EMAIL="${{ needs.generate.outputs.client_email }}"
+
+          echo "Sending ${PLAN_PATH} to ${CLIENT_EMAIL}..."
+
+          python -c "
+          from email_sender import send_plan_to_client
+          send_plan_to_client('${{ inputs.client_name }}', '${CLIENT_EMAIL}', '${PLAN_PATH}')
+          print('✅ Plan sent to client!')
+          "
+
+      - name: Move plan to sent folder
+        run: |
+          PLAN_PATH="${{ needs.generate.outputs.plan_path }}"
+          SAFE_NAME=$(echo "${{ inputs.client_name }}" | tr ' /' '_')
+          mkdir -p plans/sent
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git mv "$PLAN_PATH" "plans/sent/${SAFE_NAME}_plan.docx"
+          git commit -m "✅ Plan sent to client: ${{ inputs.client_name }}"
+          git push
+
+      - name: Summary
+        run: |
+          echo "## ✅ Phase 2: Plan Sent to Client" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Client:** ${{ inputs.client_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Email:** ${{ needs.generate.outputs.client_email }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Delivered! 🎉" >> $GITHUB_STEP_SUMMARY
