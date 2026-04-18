@@ -6,6 +6,8 @@ All formulas are evidence-based and produce consistent, accurate results.
 
 def calculate_bmi(weight_kg: float, height_cm: float) -> dict:
     """Calculate BMI and return value + category."""
+    if height_cm <= 0 or weight_kg <= 0:
+        raise ValueError(f"Invalid measurements: weight={weight_kg}kg, height={height_cm}cm. Both must be > 0.")
     height_m = height_cm / 100
     bmi = round(weight_kg / (height_m ** 2), 1)
 
@@ -24,7 +26,7 @@ def calculate_bmi(weight_kg: float, height_cm: float) -> dict:
 def calculate_bmr(weight_kg: float, height_cm: float, age: int, gender: str) -> float:
     """Calculate BMR using Mifflin-St Jeor equation."""
     bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age
-    if gender.lower() == "male":
+    if (gender or "male").lower() == "male":
         bmr += 5
     else:
         bmr -= 161
@@ -33,7 +35,7 @@ def calculate_bmr(weight_kg: float, height_cm: float, age: int, gender: str) -> 
 
 def get_activity_multiplier(activity_level: str) -> float:
     """Map activity level string to TDEE multiplier."""
-    level = activity_level.lower()
+    level = (activity_level or "").lower()
     if "sedentary" in level:
         return 1.2
     elif "light" in level or "1-3" in level or "1–3" in level:
@@ -55,7 +57,7 @@ def calculate_tdee(bmr: float, activity_level: str) -> float:
 
 def calculate_target_calories(tdee: float, fitness_goal: str) -> dict:
     """Calculate target calories based on goal."""
-    goal = fitness_goal.lower()
+    goal = (fitness_goal or "").lower()
     if "fat loss" in goal or "weight loss" in goal or "lose" in goal:
         target = tdee - 500
         strategy = "Caloric deficit (-500 kcal from TDEE)"
@@ -74,7 +76,7 @@ def calculate_target_calories(tdee: float, fitness_goal: str) -> dict:
 
 def calculate_macros(weight_kg: float, target_calories: float, fitness_goal: str) -> dict:
     """Calculate macro split in grams."""
-    goal = fitness_goal.lower()
+    goal = (fitness_goal or "").lower()
 
     # Protein: 1.8-2.2g per kg based on goal
     if "muscle gain" in goal or "bulk" in goal:
@@ -111,7 +113,7 @@ def calculate_waist_to_hip_ratio(waist_inches: float, hip_inches: float, gender:
         return None
 
     whr = round(waist_inches / hip_inches, 2)
-    if gender.lower() == "female":
+    if (gender or "male").lower() == "female":
         if whr < 0.80:
             risk = "Low health risk"
         elif whr <= 0.85:
@@ -139,7 +141,7 @@ def estimate_body_fat(bmi: float, age: int, gender: str) -> float:
     BF% = 1.20 × BMI + 0.23 × Age − 10.8 × Sex − 5.4
     (Sex: 1 for male, 0 for female)
     """
-    sex_factor = 1 if gender.lower() == "male" else 0
+    sex_factor = 1 if (gender or "male").lower() == "male" else 0
     bf = 1.20 * bmi + 0.23 * age - 10.8 * sex_factor - 5.4
     return round(max(bf, 5.0), 1)  # floor at 5%
 
@@ -151,7 +153,7 @@ def estimate_lean_mass(weight_kg: float, body_fat_pct: float) -> float:
 
 def get_body_fat_category(bf_pct: float, gender: str) -> str:
     """Categorize body fat percentage."""
-    if gender.lower() == "male":
+    if (gender or "male").lower() == "male":
         if bf_pct < 6:
             return "Essential Fat"
         elif bf_pct < 14:
@@ -177,10 +179,17 @@ def get_body_fat_category(bf_pct: float, gender: str) -> str:
 
 def compute_all_metrics(client_data: dict) -> dict:
     """Compute all health metrics from client form data."""
-    weight = float(client_data.get("Current Body Weight (in kg)", 0))
-    height = float(client_data.get("Height (in cm)", 0))
-    age = int(client_data.get("Age (years)", 0))
-    gender = client_data.get("Gender", "Male")
+    weight = _parse_float(client_data.get("Current Body Weight (in kg)", 0))
+    height = _parse_float(client_data.get("Height (in cm)", 0))
+    age = int(_parse_float(client_data.get("Age (years)", 0)))
+    gender = client_data.get("Gender") or "Male"
+
+    if weight <= 0:
+        raise ValueError(f"Invalid weight: '{client_data.get('Current Body Weight (in kg)', '')}'. Must be a positive number.")
+    if height <= 0:
+        raise ValueError(f"Invalid height: '{client_data.get('Height (in cm)', '')}'. Must be a positive number.")
+    if age <= 0 or age > 150:
+        raise ValueError(f"Invalid age: '{client_data.get('Age (years)', '')}'. Must be between 1 and 150.")
     waist = _parse_float(client_data.get("Waist Circumference (in inches)", ""))
     hip = _parse_float(client_data.get("Hip Circumference (in inches) (Females only)", ""))
     activity_level = client_data.get("Current Activity Level", "")

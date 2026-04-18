@@ -4,6 +4,7 @@ Brand: UMER HURRAH — TRANSFORMATION PROTOCOL
 """
 
 import os
+import re
 
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor, Cm, Emu
@@ -37,11 +38,11 @@ def build_document(client_data: dict, metrics: dict, plan: dict) -> str:
     _set_narrow_margins(doc)
 
     name = client_data.get("Full Name", "Client")
-    age = metrics["age"]
-    gender = metrics["gender"]
+    age = metrics.get("age", "")
+    gender = metrics.get("gender", "")
     goal = client_data.get("Primary Fitness Goal", "")
-    cal = metrics["calories"]
-    macros = metrics["macros"]
+    cal = metrics.get("calories", {})
+    macros = metrics.get("macros", {})
 
     # === BRANDED HEADER ===
     _add_branded_header(doc)
@@ -99,7 +100,7 @@ def build_document(client_data: dict, metrics: dict, plan: dict) -> str:
     _add_footer(doc)
 
     # Save
-    safe_name = name.replace(" ", "_").replace("/", "_")
+    safe_name = re.sub(r'[<>:"|?*\\/]', '_', name).replace(" ", "_")
     filename = f"{safe_name}_plan.docx"
     filepath = os.path.join(config.OUTPUT_DIR, filename)
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)
@@ -141,19 +142,19 @@ def _add_branded_header(doc):
 def _add_client_summary_table(doc, client_data, metrics, plan):
     """Colored table with body stats."""
     name = client_data.get("Full Name", "Client")
-    age = metrics["age"]
-    gender = metrics["gender"]
-    height = metrics["height_cm"]
-    weight = metrics["weight_kg"]
-    bmi = metrics["bmi"]
-    cal = metrics["calories"]
-    macros = metrics["macros"]
-    body_fat = metrics["body_fat_pct"]
-    bf_cat = metrics["body_fat_category"]
-    lean_mass = metrics["lean_mass_kg"]
-    fat_mass = metrics["fat_mass_kg"]
+    age = metrics.get("age", "")
+    gender = metrics.get("gender", "")
+    height = metrics.get("height_cm", 0)
+    weight = metrics.get("weight_kg", 0)
+    bmi = metrics.get("bmi", {})
+    cal = metrics.get("calories", {})
+    macros = metrics.get("macros", {})
+    body_fat = metrics.get("body_fat_pct", 0)
+    bf_cat = metrics.get("body_fat_category", "")
+    lean_mass = metrics.get("lean_mass_kg", 0)
+    fat_mass = metrics.get("fat_mass_kg", 0)
     whr = metrics.get("whr")
-    hydration = metrics["hydration_liters"]
+    hydration = metrics.get("hydration_liters", 0)
 
     # Info table - 2 columns
     table = doc.add_table(rows=0, cols=2)

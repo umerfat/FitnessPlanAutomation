@@ -67,8 +67,8 @@ def send_plan_to_coach(client_name: str, client_email: str, filepath: str, metri
     """Send the generated plan to the coach for review."""
     subject = f"[Review] New Client Plan — {client_name}"
 
-    bmi = metrics["bmi"]
-    cal = metrics["calories"]
+    bmi = metrics.get("bmi", {})
+    cal = metrics.get("calories", {})
 
     body = f"""New client plan generated and ready for review.
 

@@ -4,6 +4,7 @@ Matches the 'UMER HURRAH — TRANSFORMATION PROTOCOL' style.
 """
 
 import os
+import re
 
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
@@ -28,10 +29,10 @@ def build_document(client_data: dict, metrics: dict, plan: dict) -> str:
     _set_default_font(doc)
 
     name = client_data.get("Full Name", "Client")
-    age = metrics["age"]
+    age = metrics.get("age", "")
     goal = client_data.get("Primary Fitness Goal", "")
-    cal = metrics["calories"]
-    macros = metrics["macros"]
+    cal = metrics.get("calories", {})
+    macros = metrics.get("macros", {})
 
     # === TITLE ===
     _add_title(doc, f"{config.BRAND_NAME} — TRANSFORMATION PROTOCOL")
@@ -212,7 +213,7 @@ def build_document(client_data: dict, metrics: dict, plan: dict) -> str:
     run_disc.font.color.rgb = GRAY_TEXT
 
     # Save
-    safe_name = name.replace(" ", "_").replace("/", "_")
+    safe_name = re.sub(r'[<>:"|?*\\/]', '_', name).replace(" ", "_")
     filename = f"{safe_name}_plan.docx"
     filepath = os.path.join(config.OUTPUT_DIR, filename)
     os.makedirs(config.OUTPUT_DIR, exist_ok=True)

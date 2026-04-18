@@ -24,10 +24,15 @@ def generate_plan(client_data: dict, metrics: dict) -> dict:
     )
 
     response_text = response.text
+    if not response_text:
+        raise ValueError("Empty response from Gemini API")
 
     # Extract JSON from response (Gemini may wrap it in markdown code blocks)
     json_str = _extract_json(response_text)
-    plan = json.loads(json_str)
+    try:
+        plan = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON from Gemini: {e}\nResponse preview: {json_str[:300]}")
     return plan
 
 
@@ -36,10 +41,10 @@ def _build_prompt(client_data: dict, metrics: dict) -> str:
 
     # Client profile summary
     name = client_data.get("Full Name", "Client")
-    age = metrics["age"]
-    gender = metrics["gender"]
-    weight = metrics["weight_kg"]
-    height = metrics["height_cm"]
+    age = metrics.get("age", "")
+    gender = metrics.get("gender", "")
+    weight = metrics.get("weight_kg", 0)
+    height = metrics.get("height_cm", 0)
     goal = client_data.get("Primary Fitness Goal", "General fitness")
     motivation = client_data.get("Why do you want this transformation?", "")
     activity_level = client_data.get("Current Activity Level", "")
@@ -55,17 +60,17 @@ def _build_prompt(client_data: dict, metrics: dict) -> str:
     injuries = client_data.get("Any injuries or medical conditions?", "No")
 
     # Pre-calculated metrics
-    bmi = metrics["bmi"]
-    bmr = metrics["bmr"]
-    tdee = metrics["tdee"]
-    cal = metrics["calories"]
-    macros = metrics["macros"]
+    bmi = metrics.get("bmi", {})
+    bmr = metrics.get("bmr", 0)
+    tdee = metrics.get("tdee", 0)
+    cal = metrics.get("calories", {})
+    macros = metrics.get("macros", {})
     whr = metrics.get("whr")
-    hydration = metrics["hydration_liters"]
-    body_fat = metrics["body_fat_pct"]
-    bf_category = metrics["body_fat_category"]
-    lean_mass = metrics["lean_mass_kg"]
-    fat_mass = metrics["fat_mass_kg"]
+    hydration = metrics.get("hydration_liters", 0)
+    body_fat = metrics.get("body_fat_pct", 0)
+    bf_category = metrics.get("body_fat_category", "")
+    lean_mass = metrics.get("lean_mass_kg", 0)
+    fat_mass = metrics.get("fat_mass_kg", 0)
 
     whr_text = ""
     if whr:
