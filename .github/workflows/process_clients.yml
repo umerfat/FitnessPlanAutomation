@@ -9,17 +9,17 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   # ──────────────────────────────────────────────
-  # PHASE 1: Generate plan → upload artifact → email coach
+  # PHASE 1: Generate plan → commit to plans/pending → email coach
   # ──────────────────────────────────────────────
   generate:
     runs-on: ubuntu-latest
     outputs:
       client_email: ${{ steps.process.outputs.client_email }}
-      plan_filename: ${{ steps.process.outputs.plan_filename }}
+      plan_filename: ${{ steps.commit.outputs.plan_filename }}
 
     steps:
       - name: Checkout code
@@ -55,7 +55,7 @@ jobs:
           echo "${GOOGLE_TOKEN_JSON}" > token.json
 
       - name: Create directories
-        run: mkdir -p output
+        run: mkdir -p output plans/pending
 
       - name: Generate plan and email coach
         id: process
@@ -63,10 +63,6 @@ jobs:
           CI: "true"
         run: |
           python main.py --name "${{ inputs.client_name }}"
-
-          SAFE_NAME=$(echo "${{ inputs.client_name }}" | tr ' /' '_')
-          PLAN_FILE="${SAFE_NAME}_plan.docx"
-          echo "plan_filename=${PLAN_FILE}" >> $GITHUB_OUTPUT
 
           # Get client email for phase 2
           CLIENT_EMAIL=$(python -c "
@@ -76,27 +72,43 @@ jobs:
           ")
           echo "client_email=${CLIENT_EMAIL}" >> $GITHUB_OUTPUT
 
-      - name: Upload plan as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: client-plan
-          path: output/${{ steps.process.outputs.plan_filename }}
-          retention-days: 30
+      - name: Commit plan to staging area
+        id: commit
+        run: |
+          SAFE_NAME=$(echo "${{ inputs.client_name }}" | tr ' /' '_')
+          SRC="output/${SAFE_NAME}_plan.docx"
+          DEST="plans/pending/${SAFE_NAME}_plan.docx"
+          PLAN_FILENAME="${SAFE_NAME}_plan.docx"
+
+          if [ -f "$SRC" ]; then
+            cp "$SRC" "$DEST"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add "$DEST"
+            git commit -m "📋 Plan ready for review: ${{ inputs.client_name }}"
+            git push
+            echo "plan_filename=${PLAN_FILENAME}" >> $GITHUB_OUTPUT
+            echo "✅ Plan staged at ${DEST}"
+          else
+            echo "❌ No plan file found at ${SRC}"
+            exit 1
+          fi
 
       - name: Summary
         run: |
-          echo "## 📋 Phase 1: Plan Generated" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Phase 1: Plan Generated & Staged" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Client:** ${{ inputs.client_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Email:** ${{ steps.process.outputs.client_email }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Plan:** \`plans/pending/${{ steps.commit.outputs.plan_filename }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next steps:" >> $GITHUB_STEP_SUMMARY
           echo "1. ✉️ Check your email for the plan to review" >> $GITHUB_STEP_SUMMARY
-          echo "2. ✅ **No edits needed?** Approve the **send-to-client** job below" >> $GITHUB_STEP_SUMMARY
-          echo "3. 📝 **Edits needed?** Download the plan from email, edit it, then use the **Send Edited Plan** workflow to upload and send" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ **Approve as-is:** Click Review deployments → Approve the \`send-to-client\` environment" >> $GITHUB_STEP_SUMMARY
+          echo "3. 📝 **Edit first:** Download from email → edit → push the updated file to \`plans/pending/${{ steps.commit.outputs.plan_filename }}\` → then approve" >> $GITHUB_STEP_SUMMARY
 
   # ──────────────────────────────────────────────
-  # PHASE 2: After approval → send plan to client
+  # PHASE 2: After approval → send plan → cleanup
   # ──────────────────────────────────────────────
   send-to-client:
     runs-on: ubuntu-latest
@@ -104,14 +116,10 @@ jobs:
     environment: send-to-client
 
     steps:
-      - name: Checkout code
+      - name: Checkout latest (includes any edits you pushed)
         uses: actions/checkout@v4
-
-      - name: Download plan artifact
-        uses: actions/download-artifact@v4
         with:
-          name: client-plan
-          path: plan-to-send/
+          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -142,13 +150,21 @@ jobs:
           echo "${GOOGLE_CREDENTIALS_JSON}" > credentials.json
           echo "${GOOGLE_TOKEN_JSON}" > token.json
 
+      - name: Verify plan exists
+        run: |
+          PLAN_PATH="plans/pending/${{ needs.generate.outputs.plan_filename }}"
+          if [ ! -f "$PLAN_PATH" ]; then
+            echo "❌ Plan not found at ${PLAN_PATH}"
+            exit 1
+          fi
+          echo "✅ Found plan: ${PLAN_PATH}"
+
       - name: Send plan to client
         env:
           CI: "true"
         run: |
-          PLAN_FILE="${{ needs.generate.outputs.plan_filename }}"
+          PLAN_PATH="plans/pending/${{ needs.generate.outputs.plan_filename }}"
           CLIENT_EMAIL="${{ needs.generate.outputs.client_email }}"
-          PLAN_PATH="plan-to-send/${PLAN_FILE}"
 
           echo "Sending ${PLAN_PATH} to ${CLIENT_EMAIL}..."
 
@@ -158,10 +174,26 @@ jobs:
           print('✅ Plan sent to client!')
           "
 
+      - name: Cleanup — remove plan from repo
+        run: |
+          PLAN_PATH="plans/pending/${{ needs.generate.outputs.plan_filename }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git rm "$PLAN_PATH"
+
+          # Remove plans/pending/ directory if empty
+          if [ -z "$(ls -A plans/pending/ 2>/dev/null)" ]; then
+            rmdir plans/pending/ 2>/dev/null || true
+          fi
+
+          git commit -m "🧹 Cleanup: plan sent to ${{ inputs.client_name }}"
+          git push
+
       - name: Summary
         run: |
-          echo "## ✅ Phase 2: Plan Sent to Client" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Plan Sent & Cleaned Up" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Client:** ${{ inputs.client_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Email:** ${{ needs.generate.outputs.client_email }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Status:** Delivered! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Delivered & removed from repo! 🎉" >> $GITHUB_STEP_SUMMARY
