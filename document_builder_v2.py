@@ -69,18 +69,17 @@ def build_document(client_data: dict, metrics: dict, plan: dict) -> str:
     # === TRAINING SPLIT ===
     _add_section_heading(doc, "💪  TRAINING SPLIT", BRAND_BLUE)
     training = plan.get("training_split", {})
+    split_type = training.get("split_type", "")
+    if split_type:
+        split_para = doc.add_paragraph()
+        split_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = split_para.add_run(f"Split Type: {split_type}")
+        run.font.size = Pt(12)
+        run.font.bold = True
+        run.font.color.rgb = BRAND_BLUE
     days = training.get("days", [])
     for day_plan in days:
         _add_workout_day(doc, day_plan)
-
-    # Weekend rest
-    rest_para = doc.add_paragraph()
-    rest_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    rest_para.paragraph_format.space_before = Pt(12)
-    run = rest_para.add_run("🧘 Saturday & Sunday: Rest / Active Recovery (light walk, stretching, yoga)")
-    run.font.size = Pt(11)
-    run.font.italic = True
-    run.font.color.rgb = BRAND_PRIMARY
     doc.add_paragraph()
 
     # === SUPPLEMENTS ===
@@ -341,6 +340,7 @@ def _add_workout_day(doc, day_plan):
     """Colored workout day with exercises and alternatives."""
     day = day_plan.get("day", "")
     focus = day_plan.get("focus", "")
+    target_muscles = day_plan.get("target_muscles", "")
     exercises = day_plan.get("exercises", [])
 
     # Day header with colored background
@@ -349,11 +349,25 @@ def _add_workout_day(doc, day_plan):
     cell = table.rows[0].cells[0]
     _shade_cell(cell, BG_LIGHT_BLUE)
     p = cell.paragraphs[0]
-    run = p.add_run(f"  {day}  —  {focus}")
+    header_text = f"  {day}  —  {focus}"
+    if target_muscles:
+        header_text += f"  ({target_muscles})"
+    run = p.add_run(header_text)
     run.font.size = Pt(13)
     run.font.bold = True
     run.font.color.rgb = BRAND_BLUE
     _style_table_borders(table)
+
+    # If rest day (no exercises), show rest message
+    if not exercises:
+        rest_para = doc.add_paragraph()
+        rest_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        rest_para.paragraph_format.space_before = Pt(6)
+        run = rest_para.add_run("🧘 Active recovery — light walk, stretching, yoga. No gym.")
+        run.font.size = Pt(11)
+        run.font.italic = True
+        run.font.color.rgb = BRAND_PRIMARY
+        return
 
     # Exercise table
     ex_table = doc.add_table(rows=1, cols=4)

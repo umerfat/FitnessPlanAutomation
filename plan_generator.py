@@ -139,10 +139,12 @@ Generate a complete transformation protocol. Return ONLY valid JSON (no markdown
   }},
 
   "training_split": {{
+    "split_type": "{"Bro Split" if "beginner" in experience.lower() else "Push/Pull/Legs (PPL)"}",
     "days": [
       {{
         "day": "Monday",
-        "focus": "Chest",
+        "focus": "{"Chest" if "beginner" in experience.lower() else "Push A"}",
+        "target_muscles": "{"Pectorals — all angles" if "beginner" in experience.lower() else "Chest — heavy compound pressing"}",
         "exercises": [
           {{
             "name": "Exercise Name",
@@ -175,13 +177,21 @@ Generate a complete transformation protocol. Return ONLY valid JSON (no markdown
 9. IMPORTANT: For EVERY meal, provide an "alternative" field with a realistic swap option. The alternative should have similar macros but use different, equally affordable ingredients. For example, if primary has walnuts, alternative could use peanuts or flaxseeds.
 
 ### Training:
-1. Create a 5-day training split (Monday to Friday), weekends off.
+1. {"CREATE A BRO SPLIT (one major muscle group per day) — 6 training days + 1 rest day. The client is a BEGINNER so this split keeps things simple and focused. Use EXACTLY this structure:" if "beginner" in experience.lower() else "CREATE A PPL (Push/Pull/Legs) SPLIT — 6 training days + 1 rest day. The client is EXPERIENCED so this advanced split maximizes volume and frequency. Use EXACTLY this structure:"}
+{"   - Monday: Chest (Pectorals — all angles: flat, incline, decline)" if "beginner" in experience.lower() else "   - Monday: Push A (Chest — heavy compound pressing)"}
+{"   - Tuesday: Back (Lats, rhomboids, traps)" if "beginner" in experience.lower() else "   - Tuesday: Pull A (Back width — vertical + horizontal pulling)"}
+{"   - Wednesday: Legs (Quads, hamstrings, glutes, calves)" if "beginner" in experience.lower() else "   - Wednesday: Legs A (Quads — squat pattern, posterior chain)"}
+{"   - Thursday: Shoulders (All three delt heads — front, lateral, rear)" if "beginner" in experience.lower() else "   - Thursday: Push B (Upper chest + shoulder isolation)"}
+{"   - Friday: Arms (Biceps + triceps — antagonist supersets encouraged)" if "beginner" in experience.lower() else "   - Friday: Pull B (Back thickness — supinated grip, biceps detail)"}
+{"   - Saturday: Core + Cardio (Abs, obliques, cardiovascular base)" if "beginner" in experience.lower() else "   - Saturday: Legs B (Glutes + hips — hinge and thrust pattern)"}
+{"   - Sunday: Rest — Reward Yourself (Active recovery, no gym)" if "beginner" in experience.lower() else "   - Sunday: Rest (Full recovery)"}
 2. {"Adapt exercises for HOME WORKOUTS only — bodyweight, dumbbells, resistance bands. No barbell or cable machine exercises." if "home" in gym_access.lower() else "Use full gym equipment — barbells, dumbbells, cables, machines."}
 3. {"CRITICAL: Client has the following condition — " + injuries + ". Avoid exercises that aggravate this. Suggest safe alternatives." if injuries.lower() not in ("no", "none", "") else "No injury restrictions."}
-4. For experience level '{experience}': {"Focus on progressive overload, compound lifts, moderate-heavy weights." if "intermediate" in experience.lower() else "Focus on form, lighter weights, full-body or simple splits." if "beginner" in experience.lower() else "Include advanced techniques like drop sets, supersets, periodization."}
-5. Include 4-5 exercises per day.
+4. For experience level '{experience}': {"Focus on form, mind-muscle connection, lighter weights with controlled tempo. Keep exercises simple and foundational." if "beginner" in experience.lower() else "Focus on progressive overload, compound lifts, moderate-heavy weights." if "intermediate" in experience.lower() else "Include advanced techniques like drop sets, supersets, periodization."}
+5. Include 4-5 exercises per day (except Sunday which is rest — no exercises array needed for Sunday).
 6. Specify rest periods between sets (shorter for fat loss/endurance, longer for strength/muscle gain).
 7. IMPORTANT: For EVERY exercise, provide an "alternative" field with an equally effective substitute exercise that targets the same muscle group. This gives clients flexibility.
+8. Generate ALL 7 days (Monday through Sunday). Each day object must include "day", "focus", "target_muscles", and "exercises" (empty array for rest day).
 
 ### Lifestyle:
 1. Provide 4-6 personalized lifestyle tips based on the client's sleep ({sleep}), stress ({stress}), phone usage ({phone_usage}), and occupation ({occupation}).
