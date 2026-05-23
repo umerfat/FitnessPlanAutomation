@@ -8,19 +8,18 @@ on:
         required: true
         type: string
 
-# Need write permission to commit plans to repo
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # ──────────────────────────────────────────────
-  # PHASE 1: Generate plan → commit to repo → email coach
+  # PHASE 1: Generate plan → upload artifact → email coach
   # ──────────────────────────────────────────────
   generate:
     runs-on: ubuntu-latest
     outputs:
-      plan_path: ${{ steps.commit.outputs.plan_path }}
       client_email: ${{ steps.process.outputs.client_email }}
+      plan_filename: ${{ steps.process.outputs.plan_filename }}
 
     steps:
       - name: Checkout code
@@ -56,7 +55,7 @@ jobs:
           echo "${GOOGLE_TOKEN_JSON}" > token.json
 
       - name: Create directories
-        run: mkdir -p output plans/pending
+        run: mkdir -p output
 
       - name: Generate plan and email coach
         id: process
@@ -64,6 +63,10 @@ jobs:
           CI: "true"
         run: |
           python main.py --name "${{ inputs.client_name }}"
+
+          SAFE_NAME=$(echo "${{ inputs.client_name }}" | tr ' /' '_')
+          PLAN_FILE="${SAFE_NAME}_plan.docx"
+          echo "plan_filename=${PLAN_FILE}" >> $GITHUB_OUTPUT
 
           # Get client email for phase 2
           CLIENT_EMAIL=$(python -c "
@@ -73,27 +76,12 @@ jobs:
           ")
           echo "client_email=${CLIENT_EMAIL}" >> $GITHUB_OUTPUT
 
-      - name: Commit plan to repo for review
-        id: commit
-        run: |
-          # Copy generated doc to plans/pending/
-          SAFE_NAME=$(echo "${{ inputs.client_name }}" | tr ' /' '_')
-          SRC="output/${SAFE_NAME}_plan.docx"
-          DEST="plans/pending/${SAFE_NAME}_plan.docx"
-
-          if [ -f "$SRC" ]; then
-            cp "$SRC" "$DEST"
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add "$DEST"
-            git commit -m "📋 Plan ready for review: ${{ inputs.client_name }}"
-            git push
-            echo "plan_path=${DEST}" >> $GITHUB_OUTPUT
-            echo "✅ Plan committed to ${DEST}"
-          else
-            echo "❌ No plan file found at ${SRC}"
-            exit 1
-          fi
+      - name: Upload plan as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-plan
+          path: output/${{ steps.process.outputs.plan_filename }}
+          retention-days: 30
 
       - name: Summary
         run: |
@@ -101,12 +89,11 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Client:** ${{ inputs.client_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Email:** ${{ steps.process.outputs.client_email }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Plan:** \`${{ steps.commit.outputs.plan_path }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next steps:" >> $GITHUB_STEP_SUMMARY
-          echo "1. ✉️ Check your email for the plan" >> $GITHUB_STEP_SUMMARY
-          echo "2. 📝 If edits needed: update the file at \`${{ steps.commit.outputs.plan_path }}\` and push" >> $GITHUB_STEP_SUMMARY
-          echo "3. ✅ Approve the **send-to-client** job below to email the plan to the client" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✉️ Check your email for the plan to review" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ **No edits needed?** Approve the **send-to-client** job below" >> $GITHUB_STEP_SUMMARY
+          echo "3. 📝 **Edits needed?** Download the plan from email, edit it, then use the **Send Edited Plan** workflow to upload and send" >> $GITHUB_STEP_SUMMARY
 
   # ──────────────────────────────────────────────
   # PHASE 2: After approval → send plan to client
@@ -117,10 +104,14 @@ jobs:
     environment: send-to-client
 
     steps:
-      - name: Checkout latest code (includes any edits you pushed)
+      - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Download plan artifact
+        uses: actions/download-artifact@v4
         with:
-          ref: main
+          name: client-plan
+          path: plan-to-send/
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -155,8 +146,9 @@ jobs:
         env:
           CI: "true"
         run: |
-          PLAN_PATH="${{ needs.generate.outputs.plan_path }}"
+          PLAN_FILE="${{ needs.generate.outputs.plan_filename }}"
           CLIENT_EMAIL="${{ needs.generate.outputs.client_email }}"
+          PLAN_PATH="plan-to-send/${PLAN_FILE}"
 
           echo "Sending ${PLAN_PATH} to ${CLIENT_EMAIL}..."
 
@@ -165,18 +157,6 @@ jobs:
           send_plan_to_client('${{ inputs.client_name }}', '${CLIENT_EMAIL}', '${PLAN_PATH}')
           print('✅ Plan sent to client!')
           "
-
-      - name: Move plan to sent folder
-        run: |
-          PLAN_PATH="${{ needs.generate.outputs.plan_path }}"
-          SAFE_NAME=$(echo "${{ inputs.client_name }}" | tr ' /' '_')
-          mkdir -p plans/sent
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git mv "$PLAN_PATH" "plans/sent/${SAFE_NAME}_plan.docx"
-          git commit -m "✅ Plan sent to client: ${{ inputs.client_name }}"
-          git push
 
       - name: Summary
         run: |
